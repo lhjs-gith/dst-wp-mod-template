@@ -1,0 +1,11 @@
+gradients=s=2048x1090:type=linear:c0=#02040c:c1=#22507f:x0=0:y0=109:y1=1089:nb_colors=2:r=1:d=1,format=rgb24[sky];
+color=c=black:s=2048x1090:r=1:d=1,format=gray,geq=lum='255*gt(random(0)*random(1),0.9940)*(0.25+0.75*random(2))',format=rgb24[stars];
+color=c=black:s=2048x1090:r=1:d=1,format=gray,geq=lum='clip(255*exp(-pow(sqrt(pow(X-1536,2)+pow(Y-232,2))/58,2.6))+70*exp(-sqrt(pow(X-1536,2)+pow(Y-232,2))/230),0,255)',format=rgb24[moon];
+color=c=black:s=2048x1090:r=1:d=1,format=gray,geq=lum='255*lt(Y,890+70*sin(X/230)+26*sin(X/71+1.3))',boxblur=1:1,format=rgb24[hills];
+color=c=black:s=2048x1090:r=1:d=1,format=gray,geq=lum='255*(lt(Y,955)+0.28*gt(Y,955))',boxblur=3:3,format=rgb24[water];
+color=c=black:s=2048x1090:r=1:d=1,format=gray,geq=lum='clip(115*exp(-pow(abs(X-1536)/(55+170*gt(Y,955)*(Y-955)/135),1.6))*exp(-(Y-955)/165)*(0.55+0.45*sin((Y-955)/7.5))*gt(Y,955),0,255)',boxblur=1:1,format=rgb24,colorchannelmixer=rr=0.45:gg=0.70:bb=1.0[glint];
+[sky][stars]blend=all_mode=addition[s1];
+[s1][moon]blend=all_mode=addition[s2];
+[s2][hills]blend=all_mode=multiply[s3];
+[s3][water]blend=all_mode=multiply[s4];
+[s4][glint]blend=all_mode=addition[out]

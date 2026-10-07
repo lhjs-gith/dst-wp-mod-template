@@ -1,0 +1,27 @@
+# 临时产物：截图、录屏、日志、崩溃转储、压缩包
+*.log
+*.dmp
+*.zip
+_shots/
+_inbox/
+_backup/
+*.tmp
+Thumbs.db
+.DS_Store
+
+# 素材流水线留下的中间静帧（art/generate.sh 写在工作目录里，不该进仓库）
+art/still_*.png
+art/frame*.png
+A_still.png
+B_still.png
+C_still.png
+frame*.png
+
+# —— 如果你的素材有版权，别再从源码仓库分发它们 ——
+# 常见做法：工坊包用 ModUploader 的 Update Data 把素材发出去，GitHub 只留代码 + 自产示例。
+# 取消注释下面几行就够了（注意别把 art/ 里的自产示例一起排除）。
+#/movies/
+#/images/
+#/preview.jpg
+#/modicon.tex
+#/modicon.xml

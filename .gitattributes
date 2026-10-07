@@ -1,0 +1,19 @@
+* text=auto
+
+# mod 的源文件按 LF 存，避免 Windows 上 checkout 出 CRLF 之后
+# 与游戏目录里那份逐字节对不上（md5 校验会假报差异）
+*.lua  text eol=lf
+*.cfg  text eol=lf
+*.xml  text eol=lf
+*.sh   text eol=lf
+*.txt  text eol=lf
+LICENSE text eol=lf
+
+*.md   text
+
+*.ogv  binary
+*.tex  binary
+*.fsb  binary
+*.fev  binary
+*.jpg  binary
+*.png  binary

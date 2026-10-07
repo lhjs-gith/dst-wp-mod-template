@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Atlas>
+    <Texture filename="3.tex"/>
+    <Elements>
+        <Element name="3.tex" u1="0.000248016" u2="0.999751984" v1="0.000578704" v2="0.999421296"/>
+    </Elements>
+    <StraightAlpha>false</StraightAlpha>
+</Atlas>

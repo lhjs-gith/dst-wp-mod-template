@@ -134,6 +134,11 @@ ffmpeg -i movies/1.ogv -map 0:v -c copy -f null - 2>&1 | grep -oE 'frame= *[0-9]
   `frontend.lua` 只把 `FrontEnd` 定义成全局、文件末尾没有 `return`，用 `AddClassPostConstruct` 会踩中
   modutil 的 `assert(type(classdef) == "table")`，症状是 `MOD ERROR` + 模组被自动关掉 + `Force aborting`，
   看起来像"游戏无故崩溃"。
+- **别删 `modmain.lua` 开头那两行 `GLOBAL.setmetatable(env, {__index = ...})`**：mod 的沙盒环境里
+  `pcall` 是靠它从真全局取到的，删掉之后 `Asset` / `TheSim` / `AddClassPostConstruct` 全都照常工作，
+  只有跑到第一次 `pcall` 时才炸出 `attempt to call global 'pcall' (a nil value)`（实测踩过，2026-10-08）。
+  如果那次调用在 `OnUpdate` 里，异常会一路抛到 `scripts/frontend.lua:889 Update`，游戏直接
+  `Force aborting` 退出——症状和上面那条一模一样，但根因是这个前导。
 - **客户端 mod 的配置界面只渲染 list 型选项**，`type="number"` 的根本不出现 —— 所以每素材的数值参数走
   `movies/N.cfg` 旁路文件（沙盒里 `io.open` + `softresolvefilepath` 实测可用）。
 - **按键只认 `keyup`**：长按时系统连发 `keydown`，一次物理按键的 `keyup` 只来一回，否则一按跳好几张。
@@ -176,19 +181,19 @@ ffmpeg -i movies/1.ogv -map 0:v -c copy -f null - 2>&1 | grep -oE 'frame= *[0-9]
   `assets=11`（9 条壁纸 + `FILE(.fsb)` + `SOUNDPACKAGE(.fev)`），看门狗回报事件真的在响，
   四首逐个切过去都是 `playing=true`，50% 音量档在起播沿上补到了。改这些之前照着这段断言复现即可。
 
-### 这一对 `.fev`/`.fsb` 到底怎么做出来（2026-10-07 调研；2026-10-08 补上路线 5，**现在游戏里响过的是路线 1 和路线 5**）
+### 这一对 `.fev`/`.fsb` 到底怎么做出来（2026-10-07 调研；2026-10-08 补上路线 5，同日深夜路线 2 用全新工程补测完成，**现在游戏里响过的是路线 1、路线 2 和路线 5**）
 
 先说结论：**事件库（`.fev`，FEV4）到今天仍然只有 FMOD Designer 这一条路**，而 Designer 早在 FMOD Studio
 出现时就停更、也从官网下架了 —— 但**科雷的 Don't Starve Mod Tools 里打包了一份 4.44.07，同目录还有命令行版，
-2026-10-08 已在本机无 GUI 跑通构建**（见下面「路线 2 已在本机跑通」）。采样库（`.fsb`，FSB5）这一半
-2026-10-08 起**连工具都不需要了**——
+2026-10-08 已在本机无 GUI 跑通构建**，并且用**全新工程**建出的库已经在游戏里响过（见下面「路线 2 已在本机跑通」）。
+采样库（`.fsb`，FSB5）这一半 2026-10-08 起**连工具都不需要了**——
 本仓库 `tools/` 里带了一个约 120 行的 Node 写入器，直接用你自己的 mp3 打出游戏能响的包（路线 5）。
 所以五条路按门槛排：
 
 | 路线 | 要不要旧版工具 | 状态 |
 | --- | --- | --- |
 | 1. 音频封进带画面的 `.ogv` 当壁纸素材 | 完全不用 FMOD | **本仓库实测过**，见上一条与「能做和不能做」 |
-| 2. FMOD Designer 建工程 → Build 出 `.fev` + `.fsb` | **不用下载**：科雷的 Don't Starve Mod Tools 自带 FMOD Designer 4.44.07（含命令行版） | **2026-10-08 本机无 GUI 构建跑通**，产出的 `.fsb` 与 p3r 现用库逐字节相同，见下面「路线 2 已在本机跑通」 |
+| 2. FMOD Designer 建工程 → Build 出 `.fev` + `.fsb` | **不用下载**：科雷的 Don't Starve Mod Tools 自带 FMOD Designer 4.44.07（含命令行版） | **2026-10-08 游戏里实测通过**：先用现成工程无 GUI 构建出与 p3r 现用库逐字节相同的 `.fsb`，再用**全新工程**（自产音频 + 自命名）建库、进游戏 4 个事件全部出声，见下面「路线 2 已在本机跑通」 |
 | 3. 先借到一个 `.fev` 壳，之后只用 `fsbankcl.exe` 重打 `.fsb` | 需要 FMOD Engine 里的 `fsbankcl.exe`（fmod.com 是登录墙 SPA，本机下不到） | 机制在本地取证里成立，但**已被路线 5 和路线 2 双重取代**：Designer 自带的 `fmod_designercl.exe -c <格式>` 就能只重打采样库 |
 | 4. 同样借壳，但采样库用 **FMOD Studio** 构建后从 `.bank` 里切出来 | 只需要 Studio（本机就有） | **本机实测过：游戏里播不出来**，Vorbis 和 PCM 两种压缩都试过，见本节末尾 |
 | 5. 借壳 + **自己写 `.fsb`**（`tools/mkbank.mjs`，只要 ffmpeg 和 node） | 完全不用 FMOD | **2026-10-08 本机游戏里实测通过**：四次启动、零冲突 A/B、含 p3r 原库当对照，见下面「路线 5」一节 |
@@ -210,7 +215,7 @@ ffmpeg -i movies/1.ogv -map 0:v -c copy -f null - 2>&1 | grep -oE 'frame= *[0-9]
 <project><name>mymusic.fbp</name>        → 产出 mymusic.fbp.fev，也就是事件路径的前缀
 <soundbank><name>mymusic</name>          → 产出 mymusic.fsb
 <eventgroup><name>untitled</name>        → 事件 1 / 2 / 3 / 4，每个是一条 __simpleevent_sounddef__
-<_PC_banktype>DecompressedSample         → 采样以 PCM 入包
+<_PC_format>MP3 + <_PC_quality>50       → 入包编码由这两行决定（不是 banktype，见下面的更正）
 <filename>want_to_be_close.wav           → sounddef 只按文件名去 fsb 里找采样
 ```
 
@@ -276,7 +281,39 @@ SUCCESS: .../mymusic.fbp.fev   SUCCESS: mymusic.fsb        Took 00:00:13
 **修正后的结论**：路线 2 卡的地方不是"搞不到工具"，而是"没人想到工具已经在硬盘上"。
 `.fev`（FEV4）这一半目前**只有 Designer 能写**这一点不变（Studio 的 `.bank` 是 FMT 版本 146，游戏不认）；
 变化的是 Designer 本身随 Mod Tools 免费提供，且有命令行版，所以"改文本工程 → 脚本构建 → 进游戏"这条流水线
-在本机是完整可跑的。用**全新工程**（自己的音频、自己的事件名）构建出的库能否在游戏里响，见下面一条待办。
+在本机是完整可跑的。
+
+#### 用全新工程建库、进游戏实测通过（2026-10-08 深夜，路线 2 到此闭环）
+
+上面那次只是"复现别人的库"。要证明第一次做音乐 mod 的人也走得通，得换一个**全新工程**：
+自己的音频、自己的工程名/库名/事件组名，和 p3r 现用那对没有任何重名。
+
+- **音频**：ffmpeg 现做 4 段 6 秒正弦和弦（`aevalsrc` + `tremolo` + 淡入淡出），44100 Hz / 双声道 / 16 bit PCM wav，
+  取名 `zntone_a.wav` ~ `zntone_d.wav`。
+- **工程**：拿上面那个参考工程当骨架，只替换名字（`mymusic.fbp`→`znewproj.fbp`、`mymusic`→`znewbank`、
+  事件组 `untitled`→`slot`、4 个 wav 名），**GUID 一个都不动** —— sounddef 之间是**按名字**引用的，不是按 GUID。
+- **构建**：同一条命令行，产出 `znewproj.fbp.fev`（2,164 B）+ `znewbank.fsb`（482,368 B）。
+  先用 `-m` 空跑，它列出的输入就是自己那 4 个 wav、输出就是这两个文件名，不用真构建就能确认解析对不对。
+- **编码方式这件事有个先前写错的结论，这里更正**：采样库头 `0x18` mode=**11（MP3）**，和 p3r 那份一致，
+  而工程里 `_PC_banktype` 明明写着 `DecompressedSample`。真正决定编码的是 `<soundbank>` 末尾那两行
+  **`<_PC_format>MP3</_PC_format>` + `<_PC_quality>50</_PC_quality>`**，不是 `banktype`。
+  库里 4 个采样名就是不含扩展名的 `zntone_a`…，正是 FEV 引用的那串。
+- **进游戏**：一次性副本 `mods/z-tt-new`，只登记自己那 2 个资产、只用私有标签 `ZNP1`~`ZNP4`，
+  完全不碰 `FE_MUSIC`，所以和仍然启用的 p3r 互不干扰。主菜单构造后 t=10 s 把 4 个事件一起起来：
+
+```
+[00:00:44]: [ZNEW] fire i=1 ok=true err=nil
+[00:00:51]: [ZNEW] t=015.5 p1=true p2=true p3=true p4=true femusic=true
+[00:00:56]: [ZNEW] t=020.6 p1=false p2=false p3=false p4=false femusic=true
+```
+
+  四个事件全部被 FMOD 报成正在播；同一行里 `femusic=true` 是**对照组**（p3r 自己那份此刻也在响），
+  所以这一行同时证明了"新库响"和"不是新库顶掉了旧库"。之后 p1~p4 转 false 只是因为片子只有 6 秒、到点自己结束。
+  全程 0 条 `LUA ERROR`。随后让探针每 7 秒轮换重放，**耳朵确认过确实出声** —— 这一步别省，
+  `PlayingSound` 毕竟是状态位，只有听见过才敢说不是假阳性。
+
+于是路线 2 是目前**唯一一对 `.fev` + `.fsb` 都能自己产出**的方案（路线 5 只解决采样库那一半，事件库仍然要借），
+而"事件路径 = `<工程名>/<事件组>/<事件名>`"这条规则也被"改名字 → 路径跟着变、并且真响"正面验了一次。
 
 **路线 3 的依据是本仓库自己那个包的取证结果**，不是别人的说法：
 
@@ -352,9 +389,11 @@ RIFF … FEV  FMT  …  0x04 (=4)
 先纠正一段写错的取证：p3r 那个能响的 `mymusic.fsb` **不是 PCM，是 MP3**（`f18=11`）。
 按帧头 `FF FB A0 40` 解出来是 160 kbps / 44.1 kHz / joint stereo，规模也对得上：
 4 个源 wav 共 148,545,164 字节裸 PCM = 842 秒，160 kbps × 842 s = 16.89 MB = 文件实际大小。
-它旁边那份 `.fdp` 工程里写着 `_PC_banktype = DecompressedSample`，说明**这一项并不决定最终编码**
-（或者发布的那一对不是这个 autosave 构建的）——以字节的实测结果为准。顺带把 `f18` 标定清楚了：
-**2 = PCM16、11 = MP3、15 = Vorbis**，三份地面真值各自对过。
+它旁边那份 `.fdp` 工程里写着 `_PC_banktype = DecompressedSample`，说明**这一项并不决定最终编码**。
+2026-10-08 当晚这条已经查实：起作用的是 `<soundbank>` 末尾的 `_PC_format` + `_PC_quality`，
+而且就是这份 autosave 工程命令行构建出来的 `.fsb` 与发布版逐字节相同，
+"发布的那一对不是它构建的"这个备选解释也已排除——一切以字节的实测结果为准。
+顺带把 `f18` 标定清楚了：**2 = PCM16、11 = MP3、15 = Vorbis**，三份地面真值各自对过。
 
 于是"差在编码方式上"这个假设当天就被自己推翻了：**Klei 原版自己的 `amb_stream.fsb`、`bat.fsb`
 全是 `f18=15`（Vorbis），游戏里照常响。** 游戏不认 Vorbis 这个说法从来就不成立。

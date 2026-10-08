@@ -37,8 +37,8 @@
 | `mod.manifest` | Klei 打包用的清单，必须是**纯 JSON** + **你自己的新 UUID** |
 | `movies/` `images/` | 素材：`N.ogv` + `N.cfg`（参数）+ `N.tex`/`N.xml`（首帧垫图） |
 | `art/` | 三张演示壁纸的**生成脚本**与滤镜图，以及图标源图 `modicon.png` |
-| `tools/` | 无 GUI 生成 `.tex` 的两个 PowerShell 脚本 + Flags 补丁 |
-| `sound/` | 空。要放自定义音乐就得自己打 FMOD 音色库（`mymusic.fsb` + `mymusic.fbp`） |
+| `tools/` | 无 GUI 生成 `.tex` 的两个 PowerShell 脚本 + Flags 补丁；以及**自己打 `.fsb` 的两个 Node 脚本**（`fsb5.mjs` 读写器 + `mkbank.mjs` 构建器，见路线 5） |
+| `sound/` | 空。自定义音乐要的一对 `mymusic.fsb` + `mymusic.fbp.fev` 里，前者现在可以用 `tools/mkbank.mjs` 自己生成（路线 5），后者由 FMOD Designer 建工程产出 —— Designer 不用另外下载，科雷的 Don't Starve Mod Tools 里自带（见路线 2） |
 | `preview.jpg` | 工坊条目的展示图（ModUploader 只认这个位置这一张） |
 | `modicon.tex` `modicon.xml` | 模组图标 |
 
@@ -151,10 +151,12 @@ ffmpeg -i movies/1.ogv -map 0:v -c copy -f null - 2>&1 | grep -oE 'frame= *[0-9]
 
 ## 自定义音乐：能做和不能做
 
-- **不能**用你自己的 mp3/ogg/wav。饥荒没有任何播放裸音频文件的接口；实测把纯音轨的 `.ogg` 放进 `movies/`
+- **不能**直接丢裸音频进去。饥荒没有任何播放 mp3/ogg/wav 的接口；实测把纯音轨的 `.ogg` 放进 `movies/`
   彻底不认——`Video` 部件要求存在 Theora 画面轨，只有 Vorbis 的话一帧都解不出来，完全没声。
-- 想换背景音乐只有一条路：**随 mod 打包预烘焙的 FMOD 音色库**（`.fsb` + `.fev`），
-  然后用 `GLOBAL.FE_MUSIC = <事件路径>` 顶掉原版主菜单音乐。
+  但"不能用自己的歌"这一条 2026-10-08 已经被推翻了：**mp3 可以自己打包成 `.fsb`**，不需要任何 FMOD 工具，
+  见下面路线 5，本仓库 `tools/` 里直接带着能用的构建器。
+- 想换背景音乐只有一条路：**随 mod 打包 FMOD 音色库**（采样库 `.fsb` + 事件库 `.fev` 一对），
+  然后用 `GLOBAL.FE_MUSIC = <事件路径>` 顶掉原版主菜单音乐。这一对怎么来，见下一节的路线对比表。
 - 想用别的歌又不想打音色库，唯一取巧的办法是把音频封进一个带画面的 `.ogv` 当壁纸素材（素材自带音轨的话
   游戏会连声音一起放出来，和背景音乐叠着响；那一轨本身没有音量控制，但背景音乐可以用「主菜单音量」档压下去）。
 - 事件路径**和你存的文件名无关**，取决于工程内部名：
@@ -164,6 +166,9 @@ ffmpeg -i movies/1.ogv -map 0:v -c copy -f null - 2>&1 | grep -oE 'frame= *[0-9]
   把 `PROP`（工程名）、`LGCY`（音色库名）、`STRR`（事件组/事件名）读出来核对。
 - 启用步骤：把音色库放进 `sound/` → `MUSIC_TRACK_COUNT` 改成曲目数 → 取消 `modinfo.lua` 里 `music` 那一整项的注释
   并按 `data = 1~N` 填曲目名、`N+1` 是"随机播放"、`0` 是原版。
+- **`sound/` 为什么是空的**：`.fsb` 现在能自己生成（路线 5），但本模板不能把别人的 `.fev` 壳随仓库分发
+  （那是别人的工程），所以一对都不带。自己产出 `.fev` 的那一步现在也不卡了 —— **FMOD Designer 随科雷的
+  Don't Starve Mod Tools 免费分发，本机就有 4.44.07，命令行版构建已在 2026-10-08 跑通**（见路线 2 那节）。
 - 音量挂在**事件标签**上：`SoundEmitter:SetVolume("FEMusic", 0.5)`。它和游戏选项里的"音乐音量"是两条链
   （后者调 FMOD 的 `set_music` 总线），两者**叠乘**而不是互相覆盖。游戏每次重新 `PlaySound` 都可能把它顶回默认值，
   而 mod 的钩子在 post-construct、抢不到起播那一刻，所以要在"从没在响 → 在响"这个沿上补一次。
@@ -171,17 +176,22 @@ ffmpeg -i movies/1.ogv -map 0:v -c copy -f null - 2>&1 | grep -oE 'frame= *[0-9]
   `assets=11`（9 条壁纸 + `FILE(.fsb)` + `SOUNDPACKAGE(.fev)`），看门狗回报事件真的在响，
   四首逐个切过去都是 `playing=true`，50% 音量档在起播沿上补到了。改这些之前照着这段断言复现即可。
 
-### 这一对 `.fev`/`.fsb` 到底怎么做出来（2026-10-07 调研；除路线 1 外，**没有一条跑到"游戏里能响"**）
+### 这一对 `.fev`/`.fsb` 到底怎么做出来（2026-10-07 调研；2026-10-08 补上路线 5，**现在游戏里响过的是路线 1 和路线 5**）
 
 先说结论：**事件库（`.fev`，FEV4）到今天仍然只有 FMOD Designer 这一条路**，而 Designer 早在 FMOD Studio
-出现时就停更、也从官网下架了。采样库（`.fsb`，FSB5）反而是现在还能拿到工具生成的那半。所以三条路按门槛排：
+出现时就停更、也从官网下架了 —— 但**科雷的 Don't Starve Mod Tools 里打包了一份 4.44.07，同目录还有命令行版，
+2026-10-08 已在本机无 GUI 跑通构建**（见下面「路线 2 已在本机跑通」）。采样库（`.fsb`，FSB5）这一半
+2026-10-08 起**连工具都不需要了**——
+本仓库 `tools/` 里带了一个约 120 行的 Node 写入器，直接用你自己的 mp3 打出游戏能响的包（路线 5）。
+所以五条路按门槛排：
 
 | 路线 | 要不要旧版工具 | 状态 |
 | --- | --- | --- |
 | 1. 音频封进带画面的 `.ogv` 当壁纸素材 | 完全不用 FMOD | **本仓库实测过**，见上一条与「能做和不能做」 |
-| 2. FMOD Designer 建工程 → Build 出 `.fev` + `.fsb` | 需要 Designer 4.3x（官网已下架） | 调研到的唯一正规做法，本机没跑过 |
-| 3. 先借到一个 `.fev` 壳，之后只用 `fsbankcl.exe` 重打 `.fsb` | 只需要现在还能下载的 FMOD Engine | 机制在本地取证里成立，工具没跑过 |
+| 2. FMOD Designer 建工程 → Build 出 `.fev` + `.fsb` | **不用下载**：科雷的 Don't Starve Mod Tools 自带 FMOD Designer 4.44.07（含命令行版） | **2026-10-08 本机无 GUI 构建跑通**，产出的 `.fsb` 与 p3r 现用库逐字节相同，见下面「路线 2 已在本机跑通」 |
+| 3. 先借到一个 `.fev` 壳，之后只用 `fsbankcl.exe` 重打 `.fsb` | 需要 FMOD Engine 里的 `fsbankcl.exe`（fmod.com 是登录墙 SPA，本机下不到） | 机制在本地取证里成立，但**已被路线 5 和路线 2 双重取代**：Designer 自带的 `fmod_designercl.exe -c <格式>` 就能只重打采样库 |
 | 4. 同样借壳，但采样库用 **FMOD Studio** 构建后从 `.bank` 里切出来 | 只需要 Studio（本机就有） | **本机实测过：游戏里播不出来**，Vorbis 和 PCM 两种压缩都试过，见本节末尾 |
+| 5. 借壳 + **自己写 `.fsb`**（`tools/mkbank.mjs`，只要 ffmpeg 和 node） | 完全不用 FMOD | **2026-10-08 本机游戏里实测通过**：四次启动、零冲突 A/B、含 p3r 原库当对照，见下面「路线 5」一节 |
 
 **路线 2 的具体信息**（来自 2024-05 还在维护的同类游戏音频 mod 工程，作者明确写"官网已经找不到，
 只能从 Internet Archive 拿"）：用的版本是 **FMOD Designer 4.30.06**；工程文件 `.fdp` 是**纯文本**，
@@ -205,8 +215,68 @@ ffmpeg -i movies/1.ogv -map 0:v -c copy -f null - 2>&1 | grep -oE 'frame= *[0-9]
 ```
 
 所以"改一个现成壳工程"是看得见摸得着的：`.fdp` 是文本，改名、改 `<filename>` 指向自己的音频都行，
-**只要装得上 Designer 就能 Build**。本机现在装不上（只有 Studio，全盘也没有 Designer 和 `fsbankcl.exe`），
-这一条卡在获取工具，不卡在方法。
+**只要装得上 Designer 就能 Build**。
+
+#### 路线 2 已在本机跑通（2026-10-08 更正，之前这里写的"本机装不上 Designer"是错的）
+
+**工具根本不用去 fmod.com 下载 —— 科雷的免费 Mod Tools 里就打包了一份完整的 FMOD Designer。**
+安装位置（Steam 里装 *Don't Starve Mod Tools*，appid 245850，就是那个 `ModUploader.exe` 所在的工具包）：
+
+```
+<Steam>\steamapps\common\Don't Starve Mod Tools\mod_tools\FMOD_Designer\
+    fmod_designer.exe      图形界面，打开 .fdp 工程
+    fmod_designercl.exe    命令行构建（本节用的就是它）
+    fmod_eventplayer.exe   进游戏前先听一遍 .fev
+    README.TXT             版本头：FMOD Designer 4.44.07
+    ass.bat                把 .fdp/.fev 注册成上面两个程序的关联文件
+    documentation\fmod_designer.pdf
+同层还有 FMOD_Studio\FMOD Studio 1.10.10\（带一个 ONI 素材的 Template 工程）
+```
+
+这条来源是科雷论坛上的两处独立说法，都不是博客传言：
+
+- **Cheerio（科雷自己的音频开发）2013 年的官方《Sound Mod Tutorial》**（论坛 topic 27721）写的前置条件就是
+  "PC 版 + *Don't Starve Mod Tools*"，正文第一步原文是
+  "To launch the designer, Double click on the 'Don't Starve Mod Tools' in steam"。
+- **Ultroman 2019 年回帖**（论坛 topic 105114）：**"The version Klei used is 4.44.64"**，并挂了一个网盘镜像。
+  本机到 Google Drive 整站不通，但不需要走那条路了。
+- 想抄现成工程的话：论坛下载区有 Mobbstar 的 **Extended Sound Mod Tutorial**（就是基于 Cheerio 那份做的进阶示例，
+  自带 `.fdp` + README）；注意下载区 2023-01-01 起只读，老文件还能下。
+
+**无 GUI 构建实测**（拿上面那个 `mymusic.fbp.fdp.autosave` 当工程，全程没打开过任何窗口）：
+
+```
+$ fmod_designercl.exe                       # 不带参数就是完整用法
+Usage: fmod_designer <-pc|xbox360|psp|ps3|wii|wiiu|3ds|ngp|android|ios> [-a|b|h|l|m|n|p|s|t|T|c|L|C|r|k|K] <project.fdp>
+  -m  只列输入/输出文件，不构建        -a <目录>  素材源目录
+  -b <目录>  输出到别的目录            -c <格式>  覆盖所有 bank 的压缩（-pcm/-mp3/-vorbis/…）
+  -r  先清理再重建                     -n  只跑不产出 .fev/.fsb
+
+$ fmod_designercl.exe -m -pc mymusic.fbp.fdp -a "<wav 目录>"      # 空跑，验解析
+Input files:  <fdp> + chaning_seasons.wav color_your_night.wav wall_moon_full_life.wav want_to_be_close.wav
+Output files: mymusic.fbp.fev  mymusic.fsb
+
+$ fmod_designercl.exe -pc mymusic.fbp.fdp -a "<wav 目录>" -b "<输出目录>"
+Building project 'mymusic.fbp'...  FEV file written ok
+Encoded ... 4 个 wav ... Writing FSB... Finished building FSB
+SUCCESS: .../mymusic.fbp.fev   SUCCESS: mymusic.fsb        Took 00:00:13
+```
+
+产出的 `mymusic.fsb` 与 p3r 现在用的那份、以及 9 月图形界面 build 出来的那份 **md5 全等**
+（`795486d6…`，FSB5 `0x18` mode=11 即 MP3）。`.fev` 差 396 字节，原因是我喂的是 **autosave** 而不是当时保存的那版工程
+（sounddef 编号整体错位），不是工具行为不稳定——**要可复现就用保存下来的 `.fdp`，别用 `.autosave`**。
+
+两个坑记在这儿：
+
+- 工程目录不要放在映射盘或提权/非提权混用的路径下，否则加进去的音频名会变成 `/`、播放报
+  `Error starting event: File not found`、Build failed。科雷论坛 topic 118377 就是这个问题，
+  2022 年的回帖给的解法是**把工程放 Documents 再拷回去**。
+- 那句 `Qt: Untested Windows version 6.2 detected!` 是 Qt4 对新 Windows 的无害警告，构建照样 SUCCESS。
+
+**修正后的结论**：路线 2 卡的地方不是"搞不到工具"，而是"没人想到工具已经在硬盘上"。
+`.fev`（FEV4）这一半目前**只有 Designer 能写**这一点不变（Studio 的 `.bank` 是 FMT 版本 146，游戏不认）；
+变化的是 Designer 本身随 Mod Tools 免费提供，且有命令行版，所以"改文本工程 → 脚本构建 → 进游戏"这条流水线
+在本机是完整可跑的。用**全新工程**（自己的音频、自己的事件名）构建出的库能否在游戏里响，见下面一条待办。
 
 **路线 3 的依据是本仓库自己那个包的取证结果**，不是别人的说法：
 
@@ -317,12 +387,150 @@ RIFF … FEV  FMT  …  0x04 (=4)
 `p3r` 那一对照常在响；`pcm=false` 就是这份 **PCM** 切片。日志里没有任何 FMOD 报错，
 两个 `Asset` 都登记成功了，所以失败发生在 FMOD 侧而不是资源侧。
 
-**结论：`.fsb` 用 FMOD Studio 构建（Vorbis 或 PCM 都试过）在 DST 里播不出来，与压缩方式无关。**
-唯一在本机验证过的可用产出仍然是 FMOD Designer 4.3x 的 `.fev` + `.fsb` 那一对（路线 2/3）。
-唯一还没排掉的观测差异：头部 `f24` 在两个能响的包里是非零（p3r `841600964`、Klei `1876034021`/`4066884513`），
-在两份 Studio 切片里都是 `0`——**没验证过它是不是原因，别当结论用**。
-要继续挖的话只剩 `fsbankcl.exe`（本机没有，得自己从 FMOD Engine 里拿）。
-**请把 `.fev` 那半当作只有 FMOD Designer 能做**——下面这条是本仓库自己的现成证据。
+**结论：路线 4（FMOD Studio 切片）判死 —— 游戏里播不出来，与压缩方式无关（Vorbis、PCM 都试过）。**
+当时能响的产出只有 FMOD Designer 4.3x 那一代（路线 2/3 的机制）——**不过 2026-10-08 晚些时候
+路线 5 出来了：采样库这一半根本不需要任何 FMOD 工具，自己写就行，见下一节。**
+留一句给后来人：附五那次 A/B 之后我又回头核过 Studio 切片的对齐，**19 个采样全部 32 字节对齐、
+`dataStart` 也对齐**，所以路线 4 的失败不是踩了路线 5 发现的那条对齐坑；两个结果之间还剩
+`0x24` 那 16 字节这一个没排掉的差别（能响的包全非零、Studio 切片全是 0），**没验证过，别当结论用**。
+`fsbankcl.exe` 这条路本机确实拿不到——fmod.com 的下载页是要登录的 SPA，抓到的是 453 字节空壳，archive.org 不通。
+**但这件事现在不重要了**：同一台机器上科雷的 Mod Tools 自带 FMOD Designer 4.44.07，它的命令行版
+`fmod_designercl.exe -c <格式> -b <目录>` 干的正是"只重打采样库"这一件事（见上面路线 2 那节），
+而路线 5 更连工具都不碰。当年在这里搜不到 Designer，是因为按 `fsbankcl`／带空格的 `FMOD Designer` 搜，
+而实际目录和 exe 是下划线命名（`mod_tools\FMOD_Designer\fmod_designercl.exe`）——**假阴性，别再照抄这句**。
+**`.fev` 那一半仍然请当作只有 FMOD Designer 能做**——本仓库自己的现成证据是：`.bank` 的 `FMT` 版本 146、
+游戏链接的 `fmod_event64.dll` 只认 4。
+
+### 路线 5：不用任何旧工具，自己写 `.fsb`（2026-10-08 游戏里实测通过）
+
+`tools/mkbank.mjs`（约 120 行）+ `tools/fsb5.mjs`（FSB5 读写器，回环验过：读进来再写出去和原文件逐字节相同）
+从你自己的 mp3 直接产出游戏能响的采样库。**只需要 ffmpeg 和 node**，不需要 FMOD Designer、
+`fsbankcl.exe`、也不需要 FMOD Studio。`.fev` 那一半要么借一个 Designer 时代的壳，要么直接用科雷 Mod Tools
+自带的 Designer 命令行版自建（路线 2）；借来之后**采样名都不用改**，
+以后换歌只重跑这条命令。
+
+```bash
+# 0) 先确认借到的壳引用了哪些采样名（这三个常数就是 modmain.lua 顶部那三个的来源）
+grep -a -oE '[ -~]{5,}' sound/mymusic.fbp.fev | grep -E 'wav|mp3|untitled'
+
+# 1) 素材统一转成 MPEG-1 Layer III、CBR、160 kbps、44.1 kHz、双声道
+#    文件名必须等于 `.fev` 里 sounddef 引用的名字（不含扩展名）
+ffmpeg -i in.wav -ac 2 -ar 44100 -c:a libmp3lame -b:a 160k -write_id3v2 0 want_to_be_close.mp3
+
+# 2) 打包。<donor.fsb> 换任何一份"游戏里已经能响"的包都行，工具只抄它的 60 字节头部，
+#    而且它声明的采样名列表就是第 1 步要交的那几个文件名（所以 donor 一般就是这个壳原来配套的那份 fsb）
+node tools/mkbank.mjs ./mp3 mymusic.fsb <donor.fsb> nat 469 32
+```
+
+`mymusic.fsb` + `mymusic.fbp.fev` 摆进 `sound/`，把 `MUSIC_TRACK_COUNT` 改成曲目数、
+取消 `modinfo.lua` 里 `music` 那一整项的注释，就是本模板那套了。
+
+> 没装 node 也能跑：任何 Electron 程序（VSCode、各类桌面应用）都能当 node 用——
+> `ELECTRON_RUN_AS_NODE=1 "<某个 Electron 主程序>.exe" tools/mkbank.mjs …`。
+> 本机就是这么跑的（node v24.18.0，脚本只用 `node:fs` 和 `import.meta.url`）。
+
+两个前提要说白：
+- **`<donor.fsb>` 必须是 MP3（mode 11）的包**，工具遇到别的编码会直接拒。想换 Vorbis 入包得另外补
+  `VORBISDATA` chunk（type 11），这条**没验证过**，别照着改。
+- 如果不想和别人的包撞资产名（`Asset("FILE","sound/mymusic.fsb")` 撞了会分不清哪份在响），
+  把 `.fev` 里那三处内部名 `mymusic` **等长改写**成自己的名字。先用
+  `grep -a -bo 'mymusic' your.fev` 定位（本仓库这份是 `324`（PROP 工程名）/ `356`（LGCY）/ `400`（音色库名），
+  **换一份工程就不是这三个偏移**，务必先 grep），事件路径随之变成 `<新名>.fbp/untitled/1`：
+
+  ```js
+  // 三处锚点都验过再落盘；长度不变，所以后面的偏移一个都不用动
+  const fs = require('fs');
+  const NEW = 'mymusic';                 // 换成自己的名字，必须恰好 7 个字符
+  const b = fs.readFileSync('mymusic.fbp.fev');
+  for (const o of [324, 356, 400]) {
+    if (b.subarray(o, o + 7).toString('latin1') !== 'mymusic') throw new Error('anchor ' + o);
+    b.write(NEW, o, 7, 'latin1');
+  }
+  fs.writeFileSync(`${NEW}.fbp.fev`, b);
+  ```
+
+  新名字必须**恰好 7 个字符**；文件名也要跟着改成 `<新名>.fbp.fev` + `<新名>.fsb`
+  （`.fev` 文件名 = 工程内部名、`.fsb` 文件名 = 音色库内部名那两条惯例照样成立）。
+
+#### 全部已验证的构造规则
+
+| 位置 | 规则 | 怎么知道的 |
+| --- | --- | --- |
+| 头 60 字节 | **整份抄一份能响的包**，只改 `sampleHeadersSize / nameTableSize / dataSize` | 头部 `0x24` 起那 16 字节是构建期 id，跨包互不相同、看不出算法（见下面的"仍未排掉"） |
+| `0x18` mode | 编码枚举：2=PCM16、11=MP3、15=Vorbis | 对 155 个包标定过 |
+| `0x1C` u32 | 按编码固定的常数：**MP3=196608、Vorbis=1、PCM16=0** | 同上 155 个包，无一例外 |
+| 采样头 | uint64 位域：bit0 有无 chunk、bit1-4 采样率枚举（8=44100）、bit5 声道−1、**bit6-33 `dataOffset/16`**、bit34-63 `samples` | 逐字节反解 + 重序列化回环 |
+| chunk | MP3 包每个采样只有一条 `LOOP`（type 3，8 字节 = loopstart, loopend） | 六个能响的包都是 `chunks=3` |
+| `samples` | MP3 用**帧数 × 1152**（MPEG-1 L3 每帧 1152 采样） | 和能响的包对得上 |
+| 名字表 | `numSamples` 个 uint32 偏移 + NUL 结尾字符串，**名字 = FEV 里引用的文件名去掉扩展名** | 取证：`.fev` 写 `want_to_be_close.wav`，`.fsb` 存 `want_to_be_close` |
+| **数据对齐** | **每个采样的 `dataOffset`（以及 `dataStart`）必须是 32 的倍数**，也就是位域里存的 `/16` 值必须是偶数 | 本节末尾的四次启动 A/B |
+
+最后一条是唯一的坑，也是这条路线差点没走通的地方：**违反它不报任何错**——两个 `Asset` 照常登记、
+`PlayingSound` 全程 false、日志里一条 FMOD 错误都没有。游戏里 6 份"本来就能响"的包全部满足它。
+
+#### 游戏里的判定过程（副本 `z-fsbmine`，私有标签，与 `p3r` 零资产名冲突）
+
+第一轮用 12/8/16/20 秒的短音，两种 mp3 摆法（帧紧挨着 `nat` / 每帧补零到 4 的倍数 `pad4`）：
+
+```
+[FMIN] fire stage=1 name=ctrl  path=zctrl01.fbp/untitled/1 ok=true res=nil playing=true
+[FMIN] t=015.5 ctrl=true  plain=false pad4=false fem=true
+[FMIN] fire stage=2 name=plain path=ztestb1.fbp/untitled/1 ok=true res=nil playing=true
+[FMIN] t=025.6 ctrl=false plain=true  pad4=false fem=true     # nat 响
+[FMIN] fire stage=3 name=pad4  path=ztestc1.fbp/untitled/1 ok=true res=nil playing=true
+[FMIN] t=040.6 ctrl=false plain=false pad4=false fem=true     # pad4 不响，一直到 115.8 都是 false
+```
+
+当时第一反应是"FMOD 只认干净帧"——**这个结论是错的**。后面两次启动分别把播放顺序倒过来（`pad4` 放第一个，
+排除"晚起播的吃亏"这种顺序混淆）、再把曲目换成整首长度（195/228/294/127 秒），
+两次都还是只有 `nat` 那份响；最后把 `pad4` 的 `dataOffset` 补齐到 32 的倍数，**同一份补零数据立刻就响了**，
+而那份整首长度的 `nat` 换成 16 对齐之后同样哑掉——变量从头到尾只有对齐
+（`nat` 那一版是碰巧每个偏移都落在 32 的倍数上）：
+
+```
+# 第四次启动，两份都改成 32 对齐，同一次启动里 p3r 原库继续当对照
+[FMIN] fire stage=1 name=long32 path=ztestd2.fbp/untitled/1 ok=true res=nil playing=true
+[FMIN] t=015.0 long32=true  pad32=false ctrl=false fem=true
+... 020.0 / 025.0 / 030.1 / 035.1 / 040.3 六拍全是 long32=true
+[FMIN] fire stage=2 name=pad32 path=ztestc2.fbp/untitled/1 ok=true res=nil playing=true
+[FMIN] t=045.3 long32=false pad32=true  ctrl=false fem=true
+[FMIN] t=050.3 long32=false pad32=true  ctrl=false fem=true     # 补零帧 + 32 对齐 = 响
+[FMIN] fire stage=3 name=ctrl  path=zctrl01.fbp/untitled/1 ok=true res=nil playing=true
+[FMIN] t=112.1 long32=false pad32=false ctrl=true  fem=true
+```
+
+也就是说：采样数据怎么切、帧补不补零、曲目长或短都无所谓；**只有 32 字节对齐是硬的**。
+输出工具还会自查一遍（`nonaligned` 必须为 0，否则直接报错）。
+第一、四这两次启动的完整日志已存档在开发机 `p3r/_release/fsb5-evidence/`
+（`client_log.fmin1.log`、`client_log.fmin4.log`，中间两次的日志被覆盖了，没留下）。
+
+**仓库里这份 `tools/mkbank.mjs` 是可复现的**：拿第四次启动那一组输入重跑一遍
+
+```bash
+node tools/mkbank.mjs <那 4 个整首 mp3 的目录> out.fsb <donor.fsb> nat 469 32
+```
+
+产出的字节和游戏里实测响过的 `ztestd2.fsb` **md5 完全相同**（`d0f3876b535d7b98b703bea958df83a5`），
+所以文档里那三行判据不是拿一个改过的脚本回头编的。
+
+#### 仍未排掉的那一条（别把路线 5 的成立当成解释了一切）
+
+FMOD Studio 切片出来的 FSB5（路线 4）**也满足 32 字节对齐**——19 个采样全部对齐、`dataStart` 也对齐，
+但它进游戏照样不响。所以"对齐"不是 Studio 失败的原因，两者之间还剩一个没被排除的差别：
+
+- `0x24` 那 16 字节：能响的包全非零（p3r `841600964`、Klei `1876034021`/`4066884513`），
+  而两份 Studio 切片都是 `0`。本仓库自己手搓的那几份**非零**，因为是整份抄的 p3r 头部。
+
+本工具是**整份抄头**绕开了这个问题，所以路线 5 成立；但要写"凭空造一个 FSB5"还差这一格，
+**目前没人证明它到底参不参与加载**。想接着挖的话，做一次"只把那 16 字节填成非零"的 Studio 切片 A/B 就够了。
+
+#### 三条使用上的注意
+
+1. **短素材不会无缝循环**：事件时长是 `.fev` 里记着的，采样比它短就播到自身长度结束。
+   本模板的音乐看门狗会把它重新起播，所以听起来是"重复播同一段"，不是无缝循环。
+2. **`align` 参数默认 32，不要往下调**。工具会拒绝小于 32 或非 2 的幂的值。
+3. **`<template.fsb>` 只贡献头部**，不要指望它带来任何音频；采样数据全部来自你给的 mp3。
+   因此那条"事件时长/loop 点和采样长度要对上"的老限制照样在（见路线 3 那段）。
 
 ## 上架创意工坊（ModUploader）
 

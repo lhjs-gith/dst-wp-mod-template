@@ -302,15 +302,24 @@ SUCCESS: .../mymusic.fbp.fev   SUCCESS: mymusic.fsb        Took 00:00:13
   完全不碰 `FE_MUSIC`，所以和仍然启用的 p3r 互不干扰。主菜单构造后 t=10 s 把 4 个事件一起起来：
 
 ```
-[00:00:44]: [ZNEW] fire i=1 ok=true err=nil
-[00:00:51]: [ZNEW] t=015.5 p1=true p2=true p3=true p4=true femusic=true
-[00:00:56]: [ZNEW] t=020.6 p1=false p2=false p3=false p4=false femusic=true
+[00:00:04]: [ZNEW] modmain loaded assets=2
+[00:00:38]: [ZNEW] fire i=1 ok=true err=nil
+[00:00:38]: [ZNEW] fire i=2 ok=true err=nil
+[00:00:38]: [ZNEW] fire i=3 ok=true err=nil
+[00:00:38]: [ZNEW] fire i=4 ok=true err=nil
+[00:00:43]: [ZNEW] t=015.0 p1=true p2=true p3=true p4=true femusic=true
+[00:00:48]: [ZNEW] t=020.0 p1=false p2=false p3=false p4=false femusic=true
+[00:01:08]: [ZNEW] killed t=040.0
 ```
 
   四个事件全部被 FMOD 报成正在播；同一行里 `femusic=true` 是**对照组**（p3r 自己那份此刻也在响），
   所以这一行同时证明了"新库响"和"不是新库顶掉了旧库"。之后 p1~p4 转 false 只是因为片子只有 6 秒、到点自己结束。
-  全程 0 条 `LUA ERROR`。随后让探针每 7 秒轮换重放，**耳朵确认过确实出声** —— 这一步别省，
-  `PlayingSound` 毕竟是状态位，只有听见过才敢说不是假阳性。
+  随后让探针每 7 秒 `KillSound` 上一个再起下一个，四个事件轮着放到了第 39 圈（约 4.5 分钟），
+  **耳朵确认过确实出声** ——
+  这一步别省，`PlayingSound` 毕竟是状态位，只有听见过才敢说不是假阳性。
+  上面这段是**最后一次启动**的原文（游戏每次启动都重写 `client_log.txt`，中间几次没留下）；
+  这一次全程 0 条 `LUA ERROR`，但**前一次启动确实崩过**，原因就是我漏了上面那条 `pcall` 前导，
+  日志被覆盖了，教训仍然按实写进上面的坑列表。
 
 于是路线 2 是目前**唯一一对 `.fev` + `.fsb` 都能自己产出**的方案（路线 5 只解决采样库那一半，事件库仍然要借），
 而"事件路径 = `<工程名>/<事件组>/<事件名>`"这条规则也被"改名字 → 路径跟着变、并且真响"正面验了一次。

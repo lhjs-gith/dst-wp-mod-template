@@ -9,6 +9,10 @@ _backup/
 Thumbs.db
 .DS_Store
 
+# build_banks.ps1 的中间产物：转码出来的临时 mp3、上一版音色库备份，还有你自己的歌
+_build/
+music_in/
+
 # 素材流水线留下的中间静帧（art/generate.sh 写在工作目录里，不该进仓库）
 art/still_*.png
 art/frame*.png

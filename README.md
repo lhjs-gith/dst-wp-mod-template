@@ -40,8 +40,8 @@
 | `mod.manifest` | Klei 打包用的清单，必须是**纯 JSON** + **你自己的新 UUID** |
 | `movies/` `images/` | 素材：`N.ogv` + `N.cfg`（参数）+ `N.tex`/`N.xml`（首帧垫图） |
 | `art/` | 三张演示壁纸的**生成脚本**与滤镜图，以及图标源图 `modicon.png`；`from_image.sh` 吃你自己的静帧图，`common.sh` 是两者共用的构件 |
-| `tools/` | 无 GUI 生成 `.tex` 的两个 PowerShell 脚本 + Flags 补丁；**自己打 `.fsb` 的两个 Node 脚本**（`fsb5.mjs` 读写器 + `mkbank.mjs` 构建器，见路线 5）；`new_mod.sh` 一键开新 mod；`sync_to_game.sh` 同步进游戏目录并逐文件自证 |
-| `sound/` | 空。自定义音乐要的一对 `mymusic.fsb` + `mymusic.fbp.fev` 里，前者现在可以用 `tools/mkbank.mjs` 自己生成（路线 5），后者由 FMOD Designer 建工程产出 —— Designer 不用另外下载，科雷的 Don't Starve Mod Tools 里自带（见路线 2） |
+| `tools/` | 无 GUI 生成 `.tex` 的两个 PowerShell 脚本 + Flags 补丁；**自己打 `.fsb` 的脚本**（`fsb5.mjs` 读写器 + `mkbank.mjs` 单库构建器 + `build_banks.ps1` 一次重打整个 mod 的全部槽位，见路线 5 和后面那节）；`new_mod.sh` 一键开新 mod；`sync_to_game.sh` 同步进游戏目录并逐文件自证 |
+| `sound/` | 空。自定义音乐要的一对 `mymusic.fsb` + `mymusic.fbp.fev` 里，前者现在可以用 `tools/mkbank.mjs` 或 `tools/build_banks.ps1` 自己生成（路线 5），后者由 FMOD Designer 建工程产出 —— Designer 不用另外下载，科雷的 Don't Starve Mod Tools 里自带（见路线 2） |
 | `preview.jpg` | 工坊条目的展示图（ModUploader 只认这个位置这一张） |
 | `modicon.tex` `modicon.xml` | 模组图标 |
 
@@ -613,6 +613,46 @@ FMOD Studio 切片出来的 FSB5（路线 4）**也满足 32 字节对齐**—�
 2. **`align` 参数默认 32，不要往下调**。工具会拒绝小于 32 或非 2 的幂的值。
 3. **`<template.fsb>` 只贡献头部**，不要指望它带来任何音频；采样数据全部来自你给的 mp3。
    因此那条"事件时长/loop 点和采样长度要对上"的老限制照样在（见路线 3 那段）。
+
+### 一条命令重打整个 mod 的全部槽位：`tools/build_banks.ps1`
+
+路线 5 的 `mkbank.mjs` 一次只处理一个库、而且要求你把每个采样都配上 mp3。真正做音乐 mod 时你要的是
+另一个动作：**把 `sound\` 里所有库一次重打，没歌的槽位自动填静音**。这就是 `tools/build_banks.ps1`
+（我游戏里响过的那些音乐包就是它产出的）。
+
+```powershell
+# 在本仓库根目录跑；-In 那个目录里放你自己的音频（mp3/wav/flac/m4a/ogg/… 都行，脚本会统一转码）
+powershell -ExecutionPolicy Bypass -File tools\build_banks.ps1 -In "D:\我的歌"
+# 目标 mod 不是本仓库时（比如你从别的 mod 抄了一份壳来建自己的）：
+powershell -ExecutionPolicy Bypass -File tools\build_banks.ps1 -Mod "C:\路径\我的mod" -Bitrate 192
+```
+
+它做四件事：读 `<Mod>\sound\*.fsb` 的名字表和 `<Mod>\sound\*.fbp.fev` 的事件顺序，把两者对号算出
+槽位→事件号；用 ffmpeg 把 `-In` 里的音频统一转成 **MPEG-1 Layer III / CBR / 44100 Hz / 双声道**（这是
+实测唯一能被游戏播放的形态，Vorbis、PCM、非 CBR 全部静默失败）；按 donor 头部重建每个 `.fsb`，旧库先
+备份到 `<Mod>\_build\prev\`；最后写 `<Mod>\music\tracks.txt`，每行 `<事件路径> <秒数>`。
+
+三件事必须知道：
+
+1. **对号这一步不能省**。`.fsb` 的名字表是**字母序**的，而 `.fev` 里 `untitled/k` 是**创建序**，两者直接
+   按序号对齐会把你新歌塞进静音占位的事件里 —— 症状是从头到尾没声音，但 `playing=true`、日志一行错误都没有。
+   脚本靠扫 `.fev` 字符串池里 `xxx.wav` 出现的先后拿到真实发声顺序（`FsbTool::SoundOrder`），这一步对不上就直接
+   抛异常，不会给你一个静默的包。
+2. **`.fev` 壳它不生产，也不随仓库分发**（那是别人的工程，见上面「`sound/` 为什么是空的」）。你自己要么按
+   路线 2 用 Designer 建一份，要么从已经能响的那个 mod 目录里把 `sound\` 那一对拷过来。槽位上限 =
+   库数 × 每份壳的事件数，我那几份是 4 事件 × 5 库 = 20；要更多得建壳，改这个脚本没用。
+3. **它不同步进游戏**。打完跑 `sh tools/sync_to_game.sh`，那个脚本只增不删并且逐文件 md5 自证 —— 因为
+   robocopy `/MIR` 这种镜像动作会把你游戏目录里工坊版留下的别的槽位文件删掉。
+
+`music\tracks.txt` 只有"按曲目时长收尾"的引擎才需要（`TheSoundPlayer.PlayingSound` 两头都撒谎，一首歌
+什么时候播完只能自己数秒，见上面「实现要点」那几条）。本模板的看门狗按 `MUSIC_TRACK_COUNT` 数事件号、
+不读这张表，所以它多出来一个无害的文件；不想留就删。
+
+验证状态：2026-10-16 用两份合成正弦音（3.06 s / 5.07 s）配我自己那 5 份壳跑过一遍，`CAPACITY 20 slots /
+5 banks`、五个库全部重建、空槽位是那段静音（0.25 s 的源按 MP3 帧量化后回报 0.3 s）、`tracks.txt` 正好两行
+且事件号落在这两份壳的 4 号和 3 号事件上。
+脱敏只动了文件头注释、参数块、ffmpeg 查找路径和删掉的同步段 —— 内嵌那段 243 行 C# 与游戏里实测响过的那版
+逐字相同（差异只有一行注释）。
 
 ## 上架创意工坊（ModUploader）
 

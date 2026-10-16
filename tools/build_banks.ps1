@@ -18,8 +18,8 @@ build_banks.ps1 — 把一个目录里的任意音频打成饥荒能播的 FMOD 
 事件壳(.fev) + 采样库(.fsb)。而 .fsb 里实测唯一能被游戏播放的形态是 MPEG-1 Layer III CBR ——
 Vorbis / PCM / 非 CBR 都是静默失败：不报错、playing=true、没声音。
 
-这个脚本不碰 .fev（FEV4 只有 FMOD Designer 能写），也不做同步进游戏目录那一步；
-打完之后用 sh tools/sync_to_game.sh，它只增不删并且逐文件 md5 自证。
+这个脚本不碰 .fev（FEV4 只有 FMOD Designer 能写），也不同步进游戏目录。
+拷进去的时候只增不删：游戏目录里可能留着工坊版带来的别的槽位文件，robocopy /MIR 会把它们一并删掉。
 #>
 param(
     [string]$In = "",
@@ -388,5 +388,5 @@ foreach ($r in $plan) {
 Write-Output ("MANIFEST-TRACKS " + ($list.Count - 1) + " -> music/tracks.txt")
 
 Write-Output "BUILD-DONE"
-Write-Output "下一步：sh tools/sync_to_game.sh 同步进游戏目录，重启游戏，"
+Write-Output "下一步：把 mod 目录拷进游戏的 mods/ 下（只增不删），重启游戏，"
 Write-Output "然后在 client_log.txt 里确认 'Loading mod:' 那一行加载的是你期望的那一份。"

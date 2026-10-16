@@ -641,8 +641,8 @@ powershell -ExecutionPolicy Bypass -File tools\build_banks.ps1 -Mod "C:\路径\�
 2. **`.fev` 壳它不生产，也不随仓库分发**（那是别人的工程，见上面「`sound/` 为什么是空的」）。你自己要么按
    路线 2 用 Designer 建一份，要么从已经能响的那个 mod 目录里把 `sound\` 那一对拷过来。槽位上限 =
    库数 × 每份壳的事件数，我那几份是 4 事件 × 5 库 = 20；要更多得建壳，改这个脚本没用。
-3. **它不同步进游戏**。打完跑 `sh tools/sync_to_game.sh`，那个脚本只增不删并且逐文件 md5 自证 —— 因为
-   robocopy `/MIR` 这种镜像动作会把你游戏目录里工坊版留下的别的槽位文件删掉。
+3. **它不同步进游戏**。拷的时候只增不删：游戏目录里可能留着工坊版带来的别的槽位文件，
+   `robocopy /MIR` 那种镜像动作会把它们一并删掉，那不是你要的。
 
 `music\tracks.txt` 只有"按曲目时长收尾"的引擎才需要（`TheSoundPlayer.PlayingSound` 两头都撒谎，一首歌
 什么时候播完只能自己数秒，见上面「实现要点」那几条）。本模板的看门狗按 `MUSIC_TRACK_COUNT` 数事件号、

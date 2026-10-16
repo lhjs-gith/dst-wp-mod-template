@@ -13,9 +13,9 @@
 //                 and 0x34); only the sizes and the sample data are replaced. Do not invent
 //                 that header: the 16 bytes at 0x24 are non-zero in every bank known to play
 //                 and zero in every FMOD Studio slice, and nobody has tested which matters.
-//   nat|pad4      MP3 payload framing: concatenate frames as they come (nat), or zero-pad
-//                 every frame to a multiple of 4 bytes (pad4). Both verified to play; nat is
-//                 what you want unless you are mimicking an existing bank.
+//   nat|pad4      MP3 payload framing. pad4 zero-pads every frame to a multiple of 4 bytes,
+//                 which is what FMOD requires (MPEG slot = 4). nat (raw back-to-back frames)
+//                 desyncs from frame 2 on: silent, no error, playing=true. Use pad4.
 //   loopDelta     samples trimmed off the loop end (default 1152 = one MP3 frame; the p3r
 //                 bank used 469..1117).
 //   align         byte alignment of every sample's data offset. MUST be >= 32 and a power of
@@ -27,7 +27,7 @@
 import fs from 'node:fs';
 const { parse, serialize, FREQ_INDEX } = await import(new URL('./fsb5.mjs', import.meta.url));
 
-const [srcDir, outFile, donorFile, variant = 'nat', deltaS = '1152', alignS = '32'] = process.argv.slice(2);
+const [srcDir, outFile, donorFile, variant = 'pad4', deltaS = '1152', alignS = '32'] = process.argv.slice(2);
 if (!srcDir || !outFile || !donorFile) throw new Error('usage: mkbank.mjs <srcDir> <out.fsb> <donor.fsb> [nat|pad4] [loopDelta] [align]');
 const ALIGN = Number(alignS);
 if (ALIGN < 32 || (ALIGN & (ALIGN - 1))) throw new Error('align must be a power of two >= 32');

@@ -14,8 +14,11 @@
 1. **改名字。** `modinfo.lua` 的 `name` / `tagline` / `author`，和 `mod.manifest` 的 `title` / `author_name`。
 2. **换 UUID。** `mod.manifest` 里那个 `uuid` 必须换成你自己的新值（`powershell -Command "[guid]::NewGuid()"`）。
    同一个 UUID 并存两份时游戏会自己去重，抄别人的 UUID 会和已订阅的工坊版撞车。
+   第 1、2 步可以用 `sh tools/new_mod.sh <新目录> "<显示名>" "<作者>"` 一次做完：它复制整个模板、
+   删 `.git`、换一份全新 UUID、改掉那四个字段、把槽位清空，流水线和工具原样带走。
 3. **放素材。** 把任意 Theora 视频拷成 `movies/1.ogv`（游戏不认 mp4），旁边放一个 `movies/1.cfg` 写它的时长和比例。
-   首帧垫图可选，但缺了它接缝处会垫黑，见下。
+   首帧垫图可选，但缺了它接缝处会垫黑，见下。**只有一张静帧图**（插画、截图、照片）时不用手动做这四件事，
+   `sh art/from_image.sh 图.jpg` 一条命令出全套，见「素材流水线」。
 4. **进游戏看一眼。** 拷到 `Don't Starve Together/mods/<你的目录名>/`，模组列表里启用，回主菜单。
    日志 `<文档>/Klei/DoNotStarveTogether/client_log.txt` 里应有 `Loading mod: <名字> Version:1`。
    **先把其它同类壁纸 mod 关掉**（尤其是本模板的另一个副本）。实测：两个都启用时只能看到其中一个的画面，
@@ -36,8 +39,8 @@
 | `modinfo.lua` | 元信息 + 配置项（每项都有 hover）。音乐那一整项是注释掉的，加音频包时取消注释 |
 | `mod.manifest` | Klei 打包用的清单，必须是**纯 JSON** + **你自己的新 UUID** |
 | `movies/` `images/` | 素材：`N.ogv` + `N.cfg`（参数）+ `N.tex`/`N.xml`（首帧垫图） |
-| `art/` | 三张演示壁纸的**生成脚本**与滤镜图，以及图标源图 `modicon.png` |
-| `tools/` | 无 GUI 生成 `.tex` 的两个 PowerShell 脚本 + Flags 补丁；以及**自己打 `.fsb` 的两个 Node 脚本**（`fsb5.mjs` 读写器 + `mkbank.mjs` 构建器，见路线 5） |
+| `art/` | 三张演示壁纸的**生成脚本**与滤镜图，以及图标源图 `modicon.png`；`from_image.sh` 吃你自己的静帧图，`common.sh` 是两者共用的构件 |
+| `tools/` | 无 GUI 生成 `.tex` 的两个 PowerShell 脚本 + Flags 补丁；**自己打 `.fsb` 的两个 Node 脚本**（`fsb5.mjs` 读写器 + `mkbank.mjs` 构建器，见路线 5）；`new_mod.sh` 一键开新 mod；`sync_to_game.sh` 同步进游戏目录并逐文件自证 |
 | `sound/` | 空。自定义音乐要的一对 `mymusic.fsb` + `mymusic.fbp.fev` 里，前者现在可以用 `tools/mkbank.mjs` 自己生成（路线 5），后者由 FMOD Designer 建工程产出 —— Designer 不用另外下载，科雷的 Don't Starve Mod Tools 里自带（见路线 2） |
 | `preview.jpg` | 工坊条目的展示图（ModUploader 只认这个位置这一张） |
 | `modicon.tex` `modicon.xml` | 模组图标 |
@@ -72,9 +75,37 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/patch_tex_flags.ps1 -T
 printf 'duration=12\naspect=1920x1020\n' > movies/1.cfg
 ```
 
-上面这四步就是 `art/generate.sh` 做的事，仓库自带的三张演示素材是它跑出来的：除 `.ogv` 里的
-Ogg 流序号（每次编码随机，连带 CRC 一起变，解码出来的每一帧逐字节相同）之外，重跑一遍与仓库里的
-文件逐字节一致，`cfg`、`tex`、`xml` 全等。想验证自己的环境能不能跑通，就在临时目录里跑一次再 `cmp`。
+上面这四步已经写成脚本了，两种入口：
+
+- **手里是一段现成的视频** → 按上面四步手动做，或者照抄 `art/generate.sh` 里 `build_slot` 的后半段。
+- **手里只有一张静帧图**（插画、截图、照片）→ `sh art/from_image.sh 图.jpg`，一条命令出 `ogv + cfg + tex + xml` 四件。
+  它会：探源图尺寸 → 不放大、且不超出 1920x1080 地定下输出尺寸 → 把图放大到"输出尺寸 + 两圈平移余量"→
+  用 `sin(2*t*PI/T)` 驱动的 crop 窗口做无缝循环 → 取视频真正的第 0 帧做首帧垫图 → 写好这个槽位自己的 `duration`/`aspect`。
+
+```sh
+export FFMPEG='X:/.../ffmpeg.exe'                    # 带 libtheora 的 7.x 构建
+export TEXCREATOR_EXE='X:/.../TEXCreator.exe'        # 不设就跳过 .tex，只打印该手动执行的命令
+sh art/from_image.sh --batch 我的图/ --from 1         # 按文件名顺序做连续槽位
+sh art/from_image.sh 一张.jpg --slot 5 --t 20 --q 9   # 指定槽位、20 秒一圈、真 24fps
+sh art/from_image.sh 一张.jpg --slot 5 --motion none  # 完全不动，只要一张会循环的静帧
+sh art/from_image.sh --info 一张.jpg                  # 只探测尺寸，不做转换
+```
+
+常用开关：`--t` 一圈秒数（默认 14，越长越慢越省体积）、`--ax/--ay` 平移幅度像素（默认 48/26）、
+`--w/--h` 强制输出尺寸、`--q` Theora 质量、`--force` 覆盖已有槽位（不加就跳过，不会悄悄毁掉你的素材）。
+不指定 `--slot` 时写进第一个空槽；1~8 全满会明确报错而不是覆盖。
+
+**跑完必须重启游戏**才看得到新槽位；要拷进游戏目录就 `sh tools/sync_to_game.sh`
+（只拷运行时那一套文件，`art/`、`tools/`、`README.md` 留在开发目录，免得将来上架时一起传上去；
+比完还会报出"游戏目录里有、开发目录里没有"的残留槽位，那些同样会被游戏读进去）。
+
+`art/generate.sh`（生成仓库自带那三张）和 `art/from_image.sh` 共用 `art/common.sh` 里的
+`png2tex` / `write_xml` / `probe_size` / `find_texcreator`，改一处两边都生效。
+
+关于"重跑能不能复现仓库素材"：`cfg` 和 `xml` 是逐字节复现的（实测），但 **`.ogv` 和由它解出来的
+`tex` 不保证**——2026-10-09 在改动前的原始脚本上做过 A/B：三张里只有 2 号槽的首帧能逐字节复现，
+1 号和 3 号每次重跑解出来的第 0 帧都不一样（`-q:v` 的 VBR 码控不是确定性的）。所以拿 `cmp` 验环境时
+**只比 `cfg`/`xml`**，`tex` 不同不代表你这边坏了。
 
 `images/N.xml` 手写就行，元素名固定 `<槽位>.tex`，uv 各留半个纹素内缩
 （`u1 = 0.5/宽`，`u2 = 1 - u1`，v 同理）——`art/generate.sh` 里有一段 awk 直接算好写文件的写法，抄它。
@@ -83,6 +114,9 @@ Ogg 流序号（每次编码随机，连带 CRC 一起变，解码出来的每�
 低运动的慢速平移只落 **35** 帧，完全静止的输入只剩 **8** 帧，换成 `-q:v 9` 就是 **48** 帧全留（体积 3.3 倍）。
 丢的是时间轴上的洞、总时长不变，所以接缝位置和 `duration=` 都不受影响，平移类素材肉眼也看不出掉帧——
 但你要真 24fps 就把 `-q:v` 调到 9。模板自带的三张是 `-q:v 3` 生成的，等于约 17fps。
+**画面越平丢得越狠**（2026-10-09 补测：800x600 的纯渐变 14s/24fps 只落 **28** 帧 ≈ 2fps，同一张换
+`-q:v 9` 落 **300** 帧）——2fps 的平移是看得出来的，所以 `art/from_image.sh` 在帧数掉到一半以下时会
+主动打印这一条告警（`--motion none` 的静帧素材不告警，那种情况下少帧是好事）。
 本机没有 ffprobe，数帧就用这个（`-c copy` 不解码，`frame=` 就是包数）：
 
 ```sh

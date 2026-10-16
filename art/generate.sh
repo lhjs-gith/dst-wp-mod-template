@@ -10,31 +10,16 @@
 # 接缝在数学上就是连续的，不需要"正放+倒放"那种来回摆的剪法。
 set -e
 FF=${FFMPEG:-ffmpeg}
-cd "$(dirname "$0")"
+ART_DIR=$(cd "$(dirname "$0")" && pwd)
+cd "$ART_DIR"
+# shellcheck source=common.sh
+. "$ART_DIR/common.sh"
 MOVERS=../movies
 IMAGES=../images
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
-# 把 png 转成游戏认的 .tex。这一步只能靠 Klei 官方 TEXCreator（没有命令行版），
-# 用 32 位 PowerShell 反射调它；没装 Mod Tools 就跳过，脚本会把该手动执行的命令打出来。
-# 注意打出来的命令不能引用 $WORK（trap 在脚本退出时就把它删了），所以第一步是从刚生成的
-# 视频里把第 0 帧取回来，这样用户事后照抄也还能跑通。
-png2tex() {
-    if [ -z "$TEXCREATOR_EXE" ]; then
-        n=$(basename "$2" .tex)
-        echo "SKIP tex: 没有 TEXCreator，$2 没生成。设好 TEXCREATOR_EXE 再跑一次本脚本最省事；"
-        echo "  要手动做就照抄这三条（第一条从视频取回第 0 帧，因为脚本的临时目录已经删掉了）："
-        echo "  $FF -y -i $3 -frames:v 1 -update 1 frame_$n.png"
-        echo "  /c/Windows/SysWOW64/WindowsPowerShell/v1.0/powershell.exe -NoProfile -ExecutionPolicy Bypass \\"
-        echo "    -File ../tools/png2tex.ps1 -InPng frame_$n.png -OutTex $2 -ExE \"\$TEXCREATOR_EXE\""
-        echo "  powershell -NoProfile -ExecutionPolicy Bypass -File ../tools/patch_tex_flags.ps1 -Tex $2"
-        return 1
-    fi
-    /c/Windows/SysWOW64/WindowsPowerShell/v1.0/powershell.exe -NoProfile -ExecutionPolicy Bypass \
-        -File ../tools/png2tex.ps1 -InPng "$1" -OutTex "$2" -Exe "$TEXCREATOR_EXE" >/dev/null
-    powershell -NoProfile -ExecutionPolicy Bypass -File ../tools/patch_tex_flags.ps1 -Tex "$2" >/dev/null
-}
+# png2tex / write_xml / probe_size / find_texcreator 都在 common.sh 里，和 from_image.sh 共用一份。
 
 # 一个槽位的全部产物：$1=槽位 $2=静帧 filter $3=静帧宽 $4=静帧高 $5=目标宽 $6=目标高
 # $7=时长秒 $8=平移 x 幅度 $9=平移 y 幅度 $10=相位 $11=cfg 内容
@@ -58,15 +43,9 @@ build_slot() {
     # 3) 首帧垫图必须取视频真正的第 0 帧（不是静帧原图，否则接缝处会跳一下）
     $FF -loglevel error -y -i "$MOVERS/$slot.ogv" -vf "select=eq(n\,0)" -frames:v 1 -update 1 "$WORK/frame_$slot.png"
 
-    # 4) cfg 与图集描述：uv 各留半个纹素内缩，元素名固定 "<槽位>.tex"
+    # 4) cfg 与图集描述（xml 的写法在 common.sh 的 write_xml 里）
     printf '%s\n' "$cfg" > "$MOVERS/$slot.cfg"
-    awk -v w="$w" -v h="$h" -v n="$slot" 'BEGIN {
-        u1 = 0.5 / w; u2 = 1 - u1; v1 = 0.5 / h; v2 = 1 - v1
-        printf "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Atlas>\n"
-        printf "    <Texture filename=\"%d.tex\"/>\n", n
-        printf "    <Elements>\n        <Element name=\"%d.tex\" u1=\"%.9f\" u2=\"%.9f\" v1=\"%.9f\" v2=\"%.9f\"/>\n    </Elements>\n", n, u1, u2, v1, v2
-        printf "    <StraightAlpha>false</StraightAlpha>\n</Atlas>\n"
-    }' > "$IMAGES/$slot.xml"
+    write_xml "$IMAGES/$slot.xml" "$w" "$h" "$slot"
     png2tex "$WORK/frame_$slot.png" "$IMAGES/$slot.tex" "$MOVERS/$slot.ogv" || true
 }
 
